@@ -105,6 +105,17 @@ if (USE_SUPABASE && !process.env.SESSION_SECRET) {
   );
   process.exit(1);
 }
+// ENCRYPTION_KEY protege credenciais em repouso (Z-API por empresa, tokens
+// OAuth do Google) -- ver lib/crypto.js. Sem ela, essas colunas ficariam
+// gravadas em claro no banco, então o boot é recusado em modo Supabase.
+if (USE_SUPABASE && !process.env.ENCRYPTION_KEY) {
+  console.error(
+    "[boot] ENCRYPTION_KEY é obrigatória quando o Supabase está configurado.\n" +
+    "       Gere um valor com: node -e \"console.log(require('crypto').randomBytes(32).toString('base64'))\"\n" +
+    "       e defina essa variável de ambiente antes de subir o servidor."
+  );
+  process.exit(1);
+}
 const SESSION_SECRET_BUF = crypto.createHash("sha256")
   .update(process.env.SESSION_SECRET || "dev-only-insecure-secret")
   .digest();

@@ -80,6 +80,11 @@ campanhas/automações, e seu próprio login.
 
 - **`SESSION_SECRET`** é obrigatório nesse modo (assina o cookie de sessão). Gere um
   valor aleatório de 32+ bytes uma vez por ambiente — sem ele o servidor recusa subir.
+- **`ENCRYPTION_KEY`** também é obrigatório (criptografa credenciais Z-API e tokens
+  Google em repouso no banco — ver `lib/crypto.js`). Precisa ter exatamente 32 bytes
+  em base64: `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`.
+  Se já existir dado gravado em claro, rode `node scripts/migrate-encrypt.mjs` uma vez
+  (idempotente) depois de configurar essa variável.
 - **Cadastro de empresa nova**: não existe painel de admin ainda — use
   `node scripts/create-company.mjs` (veja o cabeçalho do arquivo para as variáveis
   de ambiente esperadas). O script cria a empresa, gera o segredo do webhook, cria o

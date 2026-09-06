@@ -16,6 +16,7 @@
 // silencioso para arquivos).
 // ============================================================================
 import { getClient, assertOk } from "./supabase.js";
+import { encrypt, decrypt } from "../lib/crypto.js";
 
 // Todas as consultas usam o cliente ativo (produção ou, em testes, o injetado).
 const supabase = new Proxy({}, {
@@ -40,8 +41,11 @@ function requireEmpresaId(id, ctx) {
 export const empresasRepo = {
   async create({ name, zapiInstanceId, zapiInstanceToken, zapiClientToken, webhookSecret, maxVendedores }) {
     const { data, error } = await supabase.from("empresas").insert({
-      name, zapi_instance_id: zapiInstanceId || null, zapi_instance_token: zapiInstanceToken || null,
-      zapi_client_token: zapiClientToken || null, webhook_secret: webhookSecret,
+      name,
+      zapi_instance_id: zapiInstanceId ? encrypt(zapiInstanceId) : null,
+      zapi_instance_token: zapiInstanceToken ? encrypt(zapiInstanceToken) : null,
+      zapi_client_token: zapiClientToken ? encrypt(zapiClientToken) : null,
+      webhook_secret: webhookSecret,
       max_vendedores: maxVendedores ?? 5,
     }).select("*").single();
     assertOk(error, "empresas.create");
@@ -58,9 +62,41 @@ function empresaFromRow(r) {
   return {
     id: r.id, name: r.name, active: !!r.active, maxVendedores: r.max_vendedores,
     webhookSecret: r.webhook_secret,
-    zapiInstanceId: r.zapi_instance_id || "", zapiInstanceToken: r.zapi_instance_token || "",
-    zapiClientToken: r.zapi_client_token || "",
+    zapiInstanceId: decrypt(r.zapi_instance_id) || "",
+    zapiInstanceToken: decrypt(r.zapi_instance_token) || "",
+    zapiClientToken: decrypt(r.zapi_client_token) || "",
   };
+}
+
+/**
+ * Ponto único de leitura/escrita das credenciais Z-API de uma empresa --
+ * centraliza o encrypt/decrypt em vez de espalhar pelos endpoints (A1).
+ * getById/create acima já passam pelo mesmo empresaFromRow/encrypt, então
+ * isso é sobretudo a API pensada pra uma futura tela de "reconectar WhatsApp".
+ */
+export async function getEmpresaCredentials(empresaId) {
+  requireEmpresaId(empresaId, "getEmpresaCredentials");
+  const { data, error } = await supabase
+    .from("empresas")
+    .select("zapi_instance_id, zapi_instance_token, zapi_client_token")
+    .eq("id", empresaId)
+    .maybeSingle();
+  assertOk(error, "getEmpresaCredentials");
+  if (!data) return null;
+  return {
+    zapiInstanceId: decrypt(data.zapi_instance_id) || "",
+    zapiInstanceToken: decrypt(data.zapi_instance_token) || "",
+    zapiClientToken: decrypt(data.zapi_client_token) || "",
+  };
+}
+export async function setEmpresaCredentials(empresaId, { zapiInstanceId, zapiInstanceToken, zapiClientToken }) {
+  requireEmpresaId(empresaId, "setEmpresaCredentials");
+  const { error } = await supabase.from("empresas").update({
+    zapi_instance_id: zapiInstanceId ? encrypt(zapiInstanceId) : null,
+    zapi_instance_token: zapiInstanceToken ? encrypt(zapiInstanceToken) : null,
+    zapi_client_token: zapiClientToken ? encrypt(zapiClientToken) : null,
+  }).eq("id", empresaId);
+  assertOk(error, "setEmpresaCredentials");
 }
 
 // ----------------------------------------------------------------------------
@@ -426,7 +462,7 @@ export const automacoesRepo = {
 // ----------------------------------------------------------------------------
 function conexaoGoogleFromRow(r) {
   return {
-    empresaId: r.empresa_id, accessToken: r.access_token, refreshToken: r.refresh_token,
+    empresaId: r.empresa_id, accessToken: decrypt(r.access_token), refreshToken: decrypt(r.refresh_token),
     tokenExpiry: r.token_expiry, scope: r.scope || "", connectedEmail: r.connected_email || null,
   };
 }
@@ -441,7 +477,9 @@ export const googleRepo = {
   async save(empresaId, { accessToken, refreshToken, tokenExpiry, scope, connectedEmail }) {
     requireEmpresaId(empresaId, "google.save");
     const { error } = await supabase.from("google_conexoes").upsert({
-      empresa_id: empresaId, access_token: accessToken, refresh_token: refreshToken,
+      empresa_id: empresaId,
+      access_token: accessToken ? encrypt(accessToken) : null,
+      refresh_token: refreshToken ? encrypt(refreshToken) : null,
       token_expiry: tokenExpiry, scope: scope || "", connected_email: connectedEmail || null,
     }, { onConflict: "empresa_id" });
     assertOk(error, "google.save");
@@ -450,7 +488,7 @@ export const googleRepo = {
   async updateAccessToken(empresaId, { accessToken, tokenExpiry }) {
     requireEmpresaId(empresaId, "google.updateAccessToken");
     const { error } = await supabase.from("google_conexoes")
-      .update({ access_token: accessToken, token_expiry: tokenExpiry })
+      .update({ access_token: accessToken ? encrypt(accessToken) : null, token_expiry: tokenExpiry })
       .eq("empresa_id", empresaId);
     assertOk(error, "google.updateAccessToken");
   },
