@@ -27,6 +27,9 @@ form.addEventListener("submit", async (e) => {
       const voltarPara = sessionStorage.getItem("zapflow_return_to");
       sessionStorage.removeItem("zapflow_return_to");
       window.location.href = voltarPara || (data.role === "vendedor" ? "/vendedor.html" : "/");
+    } else if (data.error === "muitas_tentativas") {
+      const minutos = Math.ceil((data.retry_after_seconds || 900) / 60);
+      errorEl.textContent = `Muitas tentativas. Aguarde ${minutos} minuto${minutos === 1 ? "" : "s"} e tente novamente.`;
     } else {
       errorEl.textContent = data.error || "Não foi possível entrar.";
     }

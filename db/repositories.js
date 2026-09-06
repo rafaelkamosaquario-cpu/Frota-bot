@@ -164,6 +164,46 @@ function usuarioFromRow(r) {
 }
 
 // ----------------------------------------------------------------------------
+// login_tentativas (A3 -- rate limit de login, sem empresa_id: username é
+// global, ver usuariosRepo.findByUsername)
+// ----------------------------------------------------------------------------
+export const loginTentativasRepo = {
+  async registrar({ username, ip, sucesso }) {
+    const { error } = await supabase.from("login_tentativas").insert({
+      username: String(username || "").trim().toLowerCase(),
+      ip: String(ip || ""),
+      sucesso: !!sucesso,
+    });
+    assertOk(error, "loginTentativas.registrar");
+  },
+  /**
+   * Conta falhas recentes por username e por ip, em 2 consultas separadas
+   * (nunca concatena valor de entrada numa string de filtro tipo .or() --
+   * username vem direto do body da requisição, e vírgula/parênteses tem
+   * significado especial na sintaxe de filtro do PostgREST).
+   */
+  async contarFalhasRecentes({ username, ip, desdeMs }) {
+    const desde = new Date(desdeMs).toISOString();
+    const u = String(username || "").trim().toLowerCase();
+    const base = () => supabase.from("login_tentativas").select("id", { count: "exact", head: true })
+      .eq("sucesso", false).gte("created_at", desde);
+    const [porUsername, porIp] = await Promise.all([
+      u ? base().eq("username", u) : Promise.resolve({ count: 0, error: null }),
+      ip ? base().eq("ip", ip) : Promise.resolve({ count: 0, error: null }),
+    ]);
+    assertOk(porUsername.error, "loginTentativas.contarFalhasRecentes (username)");
+    assertOk(porIp.error, "loginTentativas.contarFalhasRecentes (ip)");
+    return Math.max(porUsername.count || 0, porIp.count || 0);
+  },
+  /** Limpeza periódica (chamada por um setInterval em server.js, não é job do Postgres). */
+  async limparAntigas(antesDeMs) {
+    const antes = new Date(antesDeMs).toISOString();
+    const { error } = await supabase.from("login_tentativas").delete().lt("created_at", antes);
+    assertOk(error, "loginTentativas.limparAntigas");
+  },
+};
+
+// ----------------------------------------------------------------------------
 // contatos (agenda)
 // ----------------------------------------------------------------------------
 export const contatosRepo = {

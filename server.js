@@ -40,6 +40,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
+// Railway (e qualquer PaaS) fica atrás de proxy reverso -- sem isso, req.ip
+// sempre devolveria o IP interno do proxy, inutilizando o rate limit de
+// login por IP (A3). Confia só no 1º hop (o proxy da própria plataforma).
+app.set("trust proxy", 1);
 const PORT = process.env.PORT || 3000;
 const DEFAULT_DELAY_MS = Number(process.env.DEFAULT_DELAY_MS || 3000);
 // Piso de segurança: intervalos menores que isso aumentam muito o risco de
@@ -72,6 +76,11 @@ const CONV_MAX = 5000;
 const CAMPAIGN_WINDOW = 30 * 24 * 3600 * 1000; // 30 dias
 
 const SESSION_HOURS = 8;
+// A3 -- rate limit de login: 5 tentativas falhas (por username OU por ip) em
+// 15 minutos bloqueia novas tentativas por um tempo, mesmo com senha certa.
+const LOGIN_MAX_TENTATIVAS = 5;
+const LOGIN_JANELA_MS = 15 * 60 * 1000;
+const LOGIN_TENTATIVAS_RETENCAO_MS = 24 * 3600 * 1000;
 
 // --- Autenticação legada (modo arquivos, dev local, opcional via .env) ---
 const APP_USER = process.env.APP_USER || "";
@@ -274,13 +283,35 @@ app.post("/api/login", async (req, res) => {
     }
     return res.status(401).json({ ok: false, error: "Usuário ou senha incorretos." });
   }
+  const ip = req.ip || "";
   try {
+    // Checa ANTES de validar a senha -- 5 falhas recentes (por username OU
+    // por ip) bloqueia mesmo que a senha desta tentativa esteja certa.
+    const falhas = await repo.loginTentativasRepo.contarFalhasRecentes({
+      username: user || "", ip, desdeMs: Date.now() - LOGIN_JANELA_MS,
+    });
+    if (falhas >= LOGIN_MAX_TENTATIVAS) {
+      return res.status(429).json({
+        ok: false, error: "muitas_tentativas",
+        retry_after_seconds: Math.ceil(LOGIN_JANELA_MS / 1000),
+      });
+    }
+
     const found = await repo.usuariosRepo.findByUsername(user || "");
+    const match = found && found.active
+      ? await bcrypt.compare(String(password || ""), found.passwordHash)
+      : false; // roda o compare só quando faz sentido; nunca pula pra "senha errada" sem checar
+    const empresa = match ? await repo.empresasRepo.getById(found.empresaId) : null;
+    const sucesso = Boolean(match && empresa && empresa.active);
+
+    await repo.loginTentativasRepo.registrar({ username: user || "", ip, sucesso }).catch((e) => {
+      console.error("[login] registrar tentativa:", e.message); // nunca bloqueia o login por isso
+    });
+
     if (!found || !found.active) return res.status(401).json({ ok: false, error: "Usuário ou senha incorretos." });
-    const match = await bcrypt.compare(String(password || ""), found.passwordHash);
     if (!match) return res.status(401).json({ ok: false, error: "Usuário ou senha incorretos." });
-    const empresa = await repo.empresasRepo.getById(found.empresaId);
     if (!empresa || !empresa.active) return res.status(401).json({ ok: false, error: "Empresa inativa. Fale com o suporte." });
+
     res.cookie("zapflow_session", makeSessionToken({ uid: found.id, empresaId: empresa.id, role: found.role, name: found.name }), {
       httpOnly: true, sameSite: "lax", maxAge: SESSION_HOURS * 3600 * 1000,
     });
@@ -290,6 +321,18 @@ app.post("/api/login", async (req, res) => {
     return res.status(500).json({ ok: false, error: "Erro ao entrar. Tente novamente." });
   }
 });
+
+// A3 -- limpeza periódica de login_tentativas (dentro do próprio processo,
+// não é job do Postgres). Roda 1x na subida (com um atraso pra não competir
+// com a inicialização) e depois a cada hora.
+if (USE_SUPABASE) {
+  const limparLoginTentativas = () => {
+    repo.loginTentativasRepo.limparAntigas(Date.now() - LOGIN_TENTATIVAS_RETENCAO_MS)
+      .catch((e) => console.error("[login] limpeza de tentativas antigas:", e.message));
+  };
+  setTimeout(limparLoginTentativas, 30_000);
+  setInterval(limparLoginTentativas, 3600_000);
+}
 
 app.post("/api/logout", (req, res) => {
   res.clearCookie("zapflow_session");
