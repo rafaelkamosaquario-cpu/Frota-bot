@@ -432,6 +432,25 @@ function erroWhatsappNaoConfigurado(res) {
   return res.status(409).json({ error: "whatsapp_nao_configurado" });
 }
 
+/**
+ * A4 -- cota de IA por empresa. Chamado no início de toda rota que vai gastar
+ * uma chamada OpenAI, ANTES de montar prompt/gastar tokens. Devolve `true` se
+ * pode prosseguir; já envia a resposta de erro e devolve `false` se não pode.
+ */
+async function podeUsarIa(tenant, res) {
+  if (tenant.empresa.iaBloqueada) {
+    res.status(403).json({ error: "ia_desativada" });
+    return false;
+  }
+  const usado = await repo.iaConsumoRepo.contarMesAtual(tenant.empresa.id);
+  const limite = tenant.empresa.iaLimiteMensal;
+  if (usado >= limite) {
+    res.status(402).json({ error: "cota_ia_excedida", usado, limite });
+    return false;
+  }
+  return true;
+}
+
 function zapiBaseUrl({ instanceId, instanceToken }) {
   return `https://api.z-api.io/instances/${instanceId}/token/${instanceToken}`;
 }
@@ -1951,6 +1970,7 @@ app.post("/api/clients/:id/ia", async (req, res) => {
     return res.status(400).json({ error: "Integração com IA ainda não foi configurada (OPENAI_API_KEY)." });
   }
   const tenant = req.tenant;
+  if (!(await podeUsarIa(tenant, res))) return;
   const c = tenant.clients.find((x) => x.id === req.params.id);
   if (!c) return res.status(404).json({ error: "Cliente não encontrado." });
   const tipo = req.body?.tipo === "sugestao" ? "sugestao" : "resumo";
@@ -2317,6 +2337,7 @@ app.post("/api/conversas/:key/sugerir-resposta", async (req, res) => {
     return res.status(400).json({ error: "Integração com IA ainda não foi configurada (OPENAI_API_KEY)." });
   }
   const tenant = req.tenant;
+  if (!(await podeUsarIa(tenant, res))) return;
   const key = req.params.key;
   const messages = tenant.conversas.filter((m) => m.key === key).sort((a, b) => a.ts - b.ts).slice(-20);
   if (!messages.length) return res.status(400).json({ error: "Não há histórico de conversa pra sugerir uma resposta." });
@@ -2643,6 +2664,7 @@ app.post("/api/visitas/:id/ia-resumo", async (req, res) => {
     return res.status(400).json({ error: "Integração com IA ainda não foi configurada (OPENAI_API_KEY)." });
   }
   const tenant = req.tenant;
+  if (!(await podeUsarIa(tenant, res))) return;
   try {
     const visita = await carregarVisitaComPermissao(req, res);
     if (!visita) return;
@@ -2860,6 +2882,7 @@ app.post("/api/visitas/:id/preparar-followup", async (req, res) => {
     return res.status(400).json({ error: "Integração com IA ainda não foi configurada (OPENAI_API_KEY)." });
   }
   const tenant = req.tenant;
+  if (!(await podeUsarIa(tenant, res))) return;
   try {
     const visita = await carregarVisitaComPermissao(req, res);
     if (!visita) return;
@@ -3162,7 +3185,14 @@ app.use("/api/ia", (req, res, next) => {
 app.get("/api/ia/configuracao", async (req, res) => {
   try {
     const perfil = await repo.configuracoesIaRepo.get(req.tenant.empresa.id);
-    res.json({ perfil, iaConfigurada: openaiClient.openaiConfigured });
+    // A4 -- uso do mês, pra tela mostrar "Uso do mês: X de Y" sem precisar
+    // de outra chamada. Só custa 1 count adicional, mesma tabela já lida
+    // pelo gate de cota (podeUsarIa) nas rotas que realmente chamam a IA.
+    const usado = USE_SUPABASE ? await repo.iaConsumoRepo.contarMesAtual(req.tenant.empresa.id) : 0;
+    res.json({
+      perfil, iaConfigurada: openaiClient.openaiConfigured,
+      iaUso: { usado, limite: req.tenant.empresa.iaLimiteMensal, bloqueada: req.tenant.empresa.iaBloqueada },
+    });
   } catch (err) {
     console.error("[ia] configuracao get:", err.message);
     res.status(500).json({ error: "Não foi possível carregar a configuração." });
@@ -3315,6 +3345,7 @@ app.post("/api/ia/perguntar", async (req, res) => {
     return res.status(400).json({ error: "Integração com IA ainda não foi configurada (OPENAI_API_KEY)." });
   }
   const tenant = req.tenant;
+  if (!(await podeUsarIa(tenant, res))) return;
   const mensagem = String(req.body?.mensagem || "").trim();
   const historico = Array.isArray(req.body?.historico) ? req.body.historico.slice(-20) : [];
   const contextoTela = CONTEXTO_TELA_LABELS[String(req.body?.contextoTela || "")] || null;

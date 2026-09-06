@@ -3,7 +3,11 @@ const $$ = (s, c = document) => Array.from(c.querySelectorAll(s));
 
 // Traduz códigos de erro de máquina (não pensados pra aparecer na tela) em
 // mensagens amigáveis. Códigos desconhecidos caem no texto original/fallback.
-const MENSAGENS_ERRO_API = { whatsapp_nao_configurado: "Configure seu WhatsApp para continuar." };
+const MENSAGENS_ERRO_API = {
+  whatsapp_nao_configurado: "Configure seu WhatsApp para continuar.",
+  cota_ia_excedida: "Limite de uso da IA neste mês foi atingido. Volta mês que vem, ou fale com o suporte pra aumentar a cota.",
+  ia_desativada: "A IA está desativada nesta conta no momento.",
+};
 function mensagemErro(data, fallback) {
   return MENSAGENS_ERRO_API[data?.error] || data?.error || fallback;
 }
@@ -1010,7 +1014,7 @@ async function iaClienteAcao(btn, tipo) {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tipo }),
       });
       const d = await res.json();
-      if (!res.ok) throw new Error(d.error || "Não foi possível consultar a IA agora.");
+      if (!res.ok) throw new Error(mensagemErro(d, "Não foi possível consultar a IA agora."));
       return d;
     });
     out.textContent = data.resposta;
@@ -1273,7 +1277,7 @@ $("#btnSugerirResposta").addEventListener("click", async (e) => {
     const data = await withLoading(e.currentTarget, "Pensando...", async () => {
       const res = await fetch(`/api/conversas/${chatKey}/sugerir-resposta`, { method: "POST" });
       const d = await res.json();
-      if (!res.ok) throw new Error(d.error || "Não foi possível gerar uma sugestão agora.");
+      if (!res.ok) throw new Error(mensagemErro(d, "Não foi possível gerar uma sugestão agora."));
       return d;
     });
     $("#chatInput").value = data.sugestao;
@@ -2668,6 +2672,13 @@ async function loadZappyIA() {
     iaPerfilAtual = data.perfil || {};
     preencherFormPerfil(iaPerfilAtual);
     renderIaPerfil();
+    if (data.iaUso) {
+      const uso = $("#iaUsoMes");
+      uso.classList.remove("hidden");
+      uso.textContent = data.iaUso.bloqueada
+        ? "A IA está desativada nesta conta no momento."
+        : `Uso do mês: ${data.iaUso.usado} de ${data.iaUso.limite}`;
+    }
     if (data.iaConfigurada) iaAddBubble("assistant", "Oi! Sou o Zappy. Posso consultar clientes, visitas, conversas e o desempenho da equipe, propor compromissos na sua agenda e montar rascunhos de campanha. O que você precisa?");
   } catch {
     $("#iaConfigHint").textContent = "Não foi possível carregar as configurações da IA. Recarregue a página e tente novamente.";
@@ -2846,7 +2857,7 @@ async function iaEnviarMensagem() {
     });
     const data = await res.json();
     document.getElementById("iaPensando")?.remove();
-    if (!res.ok) { iaAddBubble("assistant", data.error || "Não consegui responder agora. Tente novamente em alguns instantes."); return; }
+    if (!res.ok) { iaAddBubble("assistant", mensagemErro(data, "Não consegui responder agora. Tente novamente em alguns instantes.")); return; }
     iaHistorico.push({ role: "user", content: mensagem }, { role: "assistant", content: data.resposta });
     iaAddBubble("assistant", data.resposta);
     if (data.rascunhoCampanha) {

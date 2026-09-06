@@ -65,6 +65,8 @@ function empresaFromRow(r) {
     zapiInstanceId: decrypt(r.zapi_instance_id) || "",
     zapiInstanceToken: decrypt(r.zapi_instance_token) || "",
     zapiClientToken: decrypt(r.zapi_client_token) || "",
+    iaLimiteMensal: r.ia_limite_mensal ?? 300,
+    iaBloqueada: !!r.ia_bloqueada,
   };
 }
 
@@ -672,6 +674,19 @@ export const iaConsumoRepo = {
       estimated_cost: estimatedCost || 0,
     });
     if (error) console.error("[Supabase] ia_consumo:", error.message); // log auxiliar, nunca derruba a resposta da IA
+  },
+  /** Quantas chamadas a empresa já fez no mês corrente (A4 -- cota de IA). */
+  async contarMesAtual(empresaId) {
+    requireEmpresaId(empresaId, "iaConsumo.contarMesAtual");
+    const inicioMes = new Date();
+    inicioMes.setUTCDate(1);
+    inicioMes.setUTCHours(0, 0, 0, 0);
+    const { count, error } = await supabase.from("ia_consumo")
+      .select("id", { count: "exact", head: true })
+      .eq("empresa_id", empresaId)
+      .gte("created_at", inicioMes.toISOString());
+    assertOk(error, "iaConsumo.contarMesAtual");
+    return count || 0;
   },
 };
 

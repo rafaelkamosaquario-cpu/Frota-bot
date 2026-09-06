@@ -3,7 +3,11 @@ const $$ = (s, c = document) => Array.from(c.querySelectorAll(s));
 
 // Traduz códigos de erro de máquina (não pensados pra aparecer na tela) em
 // mensagens amigáveis. Códigos desconhecidos caem no texto original/fallback.
-const MENSAGENS_ERRO_API = { whatsapp_nao_configurado: "Configure seu WhatsApp para continuar." };
+const MENSAGENS_ERRO_API = {
+  whatsapp_nao_configurado: "Configure seu WhatsApp para continuar.",
+  cota_ia_excedida: "Limite de uso da IA neste mês foi atingido.",
+  ia_desativada: "A IA está desativada nesta conta no momento.",
+};
 function mensagemErro(data, fallback) {
   return MENSAGENS_ERRO_API[data?.error] || data?.error || fallback;
 }
@@ -237,7 +241,7 @@ $("#btnResumirIa").addEventListener("click", async (e) => {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ observacao }),
       });
       const d = await res.json();
-      if (!res.ok) throw new Error(d.error || "Não foi possível gerar o resumo agora.");
+      if (!res.ok) throw new Error(mensagemErro(d, "Não foi possível gerar o resumo agora."));
       return d;
     });
     out.classList.remove("hidden");
@@ -482,7 +486,7 @@ function attachFollowupHandlers(div, v) {
       const data = await withLoading(iaBtn, "...", async () => {
         const res = await fetch(`/api/visitas/${v.id}/preparar-followup`, { method: "POST" });
         const d = await res.json();
-        if (!res.ok) throw new Error(d.error || "Não foi possível preparar a mensagem agora.");
+        if (!res.ok) throw new Error(mensagemErro(d, "Não foi possível preparar a mensagem agora."));
         return d;
       });
       input.value = data.mensagem;

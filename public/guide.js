@@ -353,7 +353,7 @@
             body: JSON.stringify({ mensagem, historico: [], contextoTela: telaAtual() }),
           });
           const data = await r.json();
-          resp.textContent = r.ok ? data.resposta : (data.error || "Não consegui responder agora.");
+          resp.textContent = r.ok ? data.resposta : mensagemErro(data, "Não consegui responder agora.");
         } catch { resp.textContent = "Não consegui responder agora. Tente novamente."; }
         input.disabled = false;
         input.value = "";
