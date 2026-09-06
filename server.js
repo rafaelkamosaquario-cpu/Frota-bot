@@ -361,11 +361,21 @@ function resolveCredentials(tenant, body = {}) {
       clientToken: (empresa.zapiClientToken || "").trim(),
     };
   }
-  return {
-    instanceId: (body.instanceId || process.env.ZAPI_INSTANCE_ID || "").trim(),
-    instanceToken: (body.instanceToken || process.env.ZAPI_INSTANCE_TOKEN || "").trim(),
-    clientToken: (body.clientToken || process.env.ZAPI_CLIENT_TOKEN || "").trim(),
-  };
+  // As variáveis ZAPI_* só existem como fallback pro modo arquivo local
+  // (dev single-tenant, sem Supabase) -- nunca usadas quando há empresa.
+  if (!USE_SUPABASE) {
+    return {
+      instanceId: (body.instanceId || process.env.ZAPI_INSTANCE_ID || "").trim(),
+      instanceToken: (body.instanceToken || process.env.ZAPI_INSTANCE_TOKEN || "").trim(),
+      clientToken: (body.clientToken || process.env.ZAPI_CLIENT_TOKEN || "").trim(),
+    };
+  }
+  return { instanceId: "", instanceToken: "", clientToken: "" };
+}
+
+/** Erro padrão quando a empresa não tem WhatsApp (Z-API) configurado. */
+function erroWhatsappNaoConfigurado(res) {
+  return res.status(409).json({ error: "whatsapp_nao_configurado" });
 }
 
 function zapiBaseUrl({ instanceId, instanceToken }) {
@@ -1110,6 +1120,7 @@ app.post("/api/contacts", upload.single("file"), (req, res) => {
 app.post("/api/test-connection", async (req, res) => {
   const creds = resolveCredentials(req.tenant, req.body);
   if (!creds.instanceId || !creds.instanceToken) {
+    if (USE_SUPABASE) return erroWhatsappNaoConfigurado(res);
     return res.status(400).json({ ok: false, error: "Informe o ID e o Token da instância." });
   }
   try {
@@ -1134,6 +1145,7 @@ app.post("/api/send", async (req, res) => {
   const delay = resolveDelayMs(req.body.delayMs);
 
   if (!creds.instanceId || !creds.instanceToken) {
+    if (USE_SUPABASE) return erroWhatsappNaoConfigurado(res);
     return res.status(400).json({ error: "Credenciais da Z-API incompletas." });
   }
   if (!Array.isArray(contacts) || contacts.length === 0) {
@@ -1225,6 +1237,7 @@ app.post("/api/schedule", async (req, res) => {
   const delayMs = resolveDelayMs(req.body.delayMs);
 
   if (!creds.instanceId || !creds.instanceToken) {
+    if (USE_SUPABASE) return erroWhatsappNaoConfigurado(res);
     return res.status(400).json({ error: "Credenciais da Z-API incompletas." });
   }
   if (!Array.isArray(contacts) || contacts.length === 0) {
@@ -2131,6 +2144,7 @@ app.post("/api/agenda/sync-chip", async (req, res) => {
   const tenant = req.tenant;
   const creds = resolveCredentials(tenant, req.body);
   if (!creds.instanceId || !creds.instanceToken) {
+    if (USE_SUPABASE) return erroWhatsappNaoConfigurado(res);
     return res.status(400).json({ error: "Conexão não configurada." });
   }
   let imported = 0;
@@ -2283,7 +2297,10 @@ app.post("/api/conversas/:key/sugerir-resposta", async (req, res) => {
 app.post("/api/conversas/:key/reply", async (req, res) => {
   const tenant = req.tenant;
   const creds = resolveCredentials(tenant, req.body);
-  if (!creds.instanceId || !creds.instanceToken) return res.status(400).json({ error: "Conexão não configurada." });
+  if (!creds.instanceId || !creds.instanceToken) {
+    if (USE_SUPABASE) return erroWhatsappNaoConfigurado(res);
+    return res.status(400).json({ error: "Conexão não configurada." });
+  }
   const message = String(req.body?.message || "").trim();
   if (!message) return res.status(400).json({ error: "Mensagem vazia." });
   const existing = tenant.conversas.find((m) => m.key === req.params.key);
@@ -2828,6 +2845,7 @@ app.post("/api/visitas/:id/followup", async (req, res) => {
     if (!phoneKey(phone)) return res.status(400).json({ error: "Essa visita não tem um telefone de contato válido." });
     const creds = resolveCredentials(tenant, {});
     if (!creds.instanceId || !creds.instanceToken) {
+      if (USE_SUPABASE) return erroWhatsappNaoConfigurado(res);
       return res.status(400).json({ error: "WhatsApp não configurado para esta empresa." });
     }
     await axios.post(`${zapiBaseUrl(creds)}/send-text`, { phone, message }, { headers: zapiHeaders(creds), timeout: 20000 });
@@ -3475,7 +3493,7 @@ app.get("/api/config", (req, res) => {
     hasEnvCredentials: Boolean(
       tenant?.empresa
         ? (tenant.empresa.zapiInstanceId && tenant.empresa.zapiInstanceToken)
-        : (process.env.ZAPI_INSTANCE_ID && process.env.ZAPI_INSTANCE_TOKEN)
+        : (!USE_SUPABASE && process.env.ZAPI_INSTANCE_ID && process.env.ZAPI_INSTANCE_TOKEN)
     ),
     defaultDelaySeconds: Math.round(Math.max(DEFAULT_DELAY_MS, MIN_DELAY_MS) / 1000),
     authEnabled: USE_SUPABASE ? true : AUTH_ENABLED,

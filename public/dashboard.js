@@ -1,6 +1,13 @@
 const $ = (s, c = document) => c.querySelector(s);
 const $$ = (s, c = document) => Array.from(c.querySelectorAll(s));
 
+// Traduz códigos de erro de máquina (não pensados pra aparecer na tela) em
+// mensagens amigáveis. Códigos desconhecidos caem no texto original/fallback.
+const MENSAGENS_ERRO_API = { whatsapp_nao_configurado: "Configure seu WhatsApp para continuar." };
+function mensagemErro(data, fallback) {
+  return MENSAGENS_ERRO_API[data?.error] || data?.error || fallback;
+}
+
 // Sessão expirada: qualquer chamada à API que volte 401 manda pro login com um aviso,
 // em vez de deixar a tela travada mostrando "Erro de conexão." sem explicar o motivo.
 (function interceptarSessaoExpirada() {
@@ -1244,7 +1251,7 @@ async function sendReply() {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message }),
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Falha ao enviar.");
+    if (!res.ok) throw new Error(mensagemErro(data, "Falha ao enviar."));
     input.value = "";
     status.textContent = "";
     openChat(chatKey, $("#chatTitle").textContent); // recarrega o histórico
@@ -1549,7 +1556,7 @@ $("#btnAgSync").addEventListener("click", async (e) => {
     const data = await withLoading(e.currentTarget, "Sincronizando...", async () => {
       const res = await fetch("/api/agenda/sync-chip", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
       const d = await res.json();
-      if (!res.ok) throw new Error(d.error || "Não foi possível sincronizar os contatos do aparelho. Tente novamente.");
+      if (!res.ok) throw new Error(mensagemErro(d, "Não foi possível sincronizar os contatos do aparelho. Tente novamente."));
       return d;
     });
     status.textContent = `${data.imported} contato(s) sincronizado(s)!`; status.className = "status ok";

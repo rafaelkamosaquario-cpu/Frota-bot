@@ -10,6 +10,13 @@ const MAX_MESSAGES = 5;
 const $ = (sel, ctx = document) => ctx.querySelector(sel);
 const $$ = (sel, ctx = document) => Array.from(ctx.querySelectorAll(sel));
 
+// Traduz códigos de erro de máquina (não pensados pra aparecer na tela) em
+// mensagens amigáveis. Códigos desconhecidos caem no texto original/fallback.
+const MENSAGENS_ERRO_API = { whatsapp_nao_configurado: "Configure seu WhatsApp para continuar." };
+function mensagemErro(data, fallback) {
+  return MENSAGENS_ERRO_API[data?.error] || data?.error || fallback;
+}
+
 // Sessão expirada: qualquer chamada à API que volte 401 manda pro login com um aviso,
 // em vez de deixar a tela travada mostrando "Erro de conexão." sem explicar o motivo.
 (function interceptarSessaoExpirada() {
@@ -99,7 +106,7 @@ async function runConnectionTest() {
       }
     } else {
       setConnState("off", "WhatsApp desconectado");
-      setBoth(data.error || "Não foi possível confirmar a conexão com o WhatsApp. Confira o ID da instância e os tokens.", "err");
+      setBoth(mensagemErro(data, "Não foi possível confirmar a conexão com o WhatsApp. Confira o ID da instância e os tokens."), "err");
     }
   } catch {
     setConnState("off", "WhatsApp desconectado");
@@ -200,7 +207,7 @@ if (btnSyncChip) {
         body: JSON.stringify(getCredentials()),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Não foi possível sincronizar os contatos do aparelho. Tente novamente.");
+      if (!res.ok) throw new Error(mensagemErro(data, "Não foi possível sincronizar os contatos do aparelho. Tente novamente."));
 
       // Puxa a agenda (já com os contatos do chip) e adiciona à lista de disparo
       const ag = await (await fetch("/api/agenda")).json();
@@ -649,7 +656,7 @@ async function handleSendAll() {
         if (res.ok) scheduled++;
       } else {
         const res = await fetch("/api/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...getCredentials(), contacts, message, images, delayMs: getDelayMs(), name }) });
-        if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || "Não foi possível enviar esta mensagem. Verifique a conexão com o WhatsApp e tente novamente."); }
+        if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(mensagemErro(d, "Não foi possível enviar esta mensagem. Verifique a conexão com o WhatsApp e tente novamente.")); }
         const reader = res.body.getReader(), dec = new TextDecoder(); let buf = "";
         while (true) {
           const { value, done } = await reader.read(); if (done) break;
@@ -848,7 +855,7 @@ async function sendNowBlock(block, message, images) {
     });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
-      throw new Error(data.error || "Não foi possível iniciar o envio. Verifique a conexão com o WhatsApp e tente novamente.");
+      throw new Error(mensagemErro(data, "Não foi possível iniciar o envio. Verifique a conexão com o WhatsApp e tente novamente."));
     }
 
     const reader = res.body.getReader();
@@ -908,7 +915,7 @@ async function scheduleBlock(block, message, images) {
       }),
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Não foi possível agendar esta mensagem. Tente novamente.");
+    if (!res.ok) throw new Error(mensagemErro(data, "Não foi possível agendar esta mensagem. Tente novamente."));
     status.textContent = `Agendada para ${quando}`;
     status.className = "m-status status ok";
     loadSchedules();

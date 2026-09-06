@@ -1,6 +1,13 @@
 const $ = (s, c = document) => c.querySelector(s);
 const $$ = (s, c = document) => Array.from(c.querySelectorAll(s));
 
+// Traduz códigos de erro de máquina (não pensados pra aparecer na tela) em
+// mensagens amigáveis. Códigos desconhecidos caem no texto original/fallback.
+const MENSAGENS_ERRO_API = { whatsapp_nao_configurado: "Configure seu WhatsApp para continuar." };
+function mensagemErro(data, fallback) {
+  return MENSAGENS_ERRO_API[data?.error] || data?.error || fallback;
+}
+
 // Sessão expirada: qualquer chamada à API que volte 401 manda pro login com um aviso,
 // em vez de deixar a tela travada mostrando "Erro de conexão." sem explicar o motivo.
 (function interceptarSessaoExpirada() {
@@ -499,7 +506,7 @@ function attachFollowupHandlers(div, v) {
       });
       const data = await res.json();
       if (!res.ok) {
-        status.textContent = data.error || "Não foi possível enviar o follow-up. Tente novamente.";
+        status.textContent = mensagemErro(data, "Não foi possível enviar o follow-up. Tente novamente.");
         status.className = "status err followup-status";
         sendBtn.disabled = false;
         return;
